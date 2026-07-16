@@ -111,20 +111,15 @@ object FrontendPlugin extends AutoPlugin {
 
   import autoImport.*
 
+  private val frontendResources =
+    taskKey[Seq[File]](
+      "Verifies the cached UI bundle exists on disk and adapts it for resourceGenerators."
+    )
+
   private val isWindows = sys.props("os.name").toLowerCase.contains("win")
 
   // ProcessBuilder resolves npm.cmd on Windows; plain "npm" finds only the shell script there.
   private val npm = if (isWindows) "npm.cmd" else "npm"
-
-  /** Mirrors sbt's own `ActionCache.dirZipExt`, which is private[sbt] and so
-    * cannot be referenced.
-    *
-    * Used to keep the cache's directory archive out of the jar. If sbt ever
-    * renames the extension this does not error -- the jar just quietly grows by
-    * the size of the whole bundle again. Nothing guards it: catching it needs a
-    * real build, which means an sbt scripted test.
-    */
-  private val dirZipExt = ".sbtdir.zip"
 
   override lazy val projectSettings: Seq[Setting[?]] = Seq(
     frontendDirectory := (ThisProject / baseDirectory).value / "ui",
@@ -163,22 +158,43 @@ object FrontendPlugin extends AutoPlugin {
     // cache hit would happily skip `npm ci` on a tree someone had deleted node_modules from.
     frontendInstall := Def.uncached(installTask.value),
     frontendBuild := buildTask.value,
+
+    // uncached: this is where "the bundle exists on disk" is enforced, and an enforcement task
+    // that can be skipped as a cache hit enforces nothing -- on a hit, sbt skips exactly the body
+    // that does the checking (observed: a hand-deleted frontendTarget shipped as a jar with no UI
+    // in it, green). Def.uncached also permits the Seq[File] return type, which a cached sbt 2
+    // task rejects.
+    frontendResources := Def.uncached(resourcesTask.value),
     Compile / resourceGenerators += frontendResources.taskValue,
 
-    // The action cache archives a declared output directory to a sibling `<dir>.sbtdir.zip`, so
-    // ours lands at resourceManaged/public.sbtdir.zip -- inside a managed resource directory, where
-    // packageBin's mappings scan picks it up. The archive is a complete copy of the bundle, so
-    // without this the jar carries every asset twice.
+    // The action cache archives a declared output directory to a *sibling* of that directory
+    // (`public.sbtdir.zip` today), so ours lands inside resourceManaged, where packageBin's
+    // mappings scan picks it up. The archive is a complete copy of the bundle, so without this
+    // the jar carries every asset twice.
     //
     // frontendTarget has to live under resourceManaged: that is what puts the bundle on the
     // classpath at /public, where both Assets and packaging read it from, and managed resources are
     // rebased relative to resourceManaged. The archive landing there too is collateral. sbt has no
     // exclusion of its own because its cached directories (semanticdb's targetRoot, the classes
     // dir) are never inside a resource directory.
-    Compile / packageBin / mappings := (Compile / packageBin / mappings).value
-      .filterNot { case (_, path) =>
-        path.endsWith(dirZipExt)
+    //
+    // Filtered by location -- any sibling named `<target>.<anything>` -- rather than by the
+    // `.sbtdir.zip` extension. The extension is sbt-internal (ActionCache.dirZipExt is
+    // private[sbt], so it cannot be referenced, only copied), and a hardcoded copy fails silently
+    // if sbt ever renames it: no error, the jar just grows by the size of the bundle. Location
+    // doesn't rot the same way, because only the action cache writes siblings of a declared
+    // output directory.
+    Compile / packageBin / mappings := {
+      val conv = fileConverter.value
+      val out = frontendTarget.value.toPath
+      val prefix = out.getFileName.toString + "."
+      (Compile / packageBin / mappings).value.filterNot { case (ref, _) =>
+        val p = conv.toPath(ref)
+        p.getParent == out.getParent && p.getFileName.toString.startsWith(
+          prefix
+        )
       }
+    }
   )
 
   private def sourcesTask = Def.task {
@@ -239,15 +255,36 @@ object FrontendPlugin extends AutoPlugin {
 
     // Reading these hashes is what pulls them into this task's cache key.
     val sources = frontendSources.value
+    if (sources.isEmpty)
+      sys.error(
+        s"No UI sources found under $dir. Check frontendDirectory and the " +
+          "frontendBuild / fileInputs globs."
+      )
     log.info(
       s"[frontend] Building UI bundle from ${sources.size} sources into $out"
     )
+    // Emptied here, not left to vite's --emptyOutDir, so it holds for any frontendBuildCommand:
+    // after the command runs, everything in frontendTarget was written by this build -- which is
+    // what makes the index.html check below meaningful. Without this, output surviving from a
+    // previous build satisfies the check and masks a command that silently wrote elsewhere.
+    IO.delete(out)
     run(
       frontendBuildCommand.value ++ outDirArgs(out),
       dir,
       log,
       "UI build failed"
     )
+
+    // A build that exits 0 but leaves frontendTarget without an entry page wrote its output
+    // somewhere else (typically vite's default ui/dist, when a custom frontendBuildCommand
+    // doesn't forward --outDir). Without this check that ships as a jar with no UI in it and a
+    // green build; an sbt task that returns Seq.empty fails nothing downstream.
+    if (!(out / "index.html").isFile())
+      sys.error(
+        s"UI build exited 0 but wrote no index.html into $out. " +
+          "frontendBuildCommand must let the appended --outDir reach vite; " +
+          "an `npm run` script needs a trailing `--`."
+      )
 
     Def.declareOutputDirectory(conv.toVirtualFile(out.toPath))
     (out ** AllPassFilter).get().filter(_.isFile).map { f =>
@@ -257,10 +294,25 @@ object FrontendPlugin extends AutoPlugin {
 
   /** Adapts the cached bundle back to the `Seq[File]` that resourceGenerators
     * still expects.
+    *
+    * The existence check is not paranoia. On a cache hit `frontendBuild` reruns
+    * nothing and sbt does not re-materialize a declared output directory that
+    * was deleted by hand -- the refs come back but the files are gone, and
+    * without this check `packageBin` ships a jar with no UI in it and a green
+    * build (observed, not theorized). Failing here converts that into a loud
+    * error naming the fix.
     */
-  private def frontendResources = Def.task {
+  private def resourcesTask = Def.task {
     val conv = fileConverter.value
-    frontendBuild.value.map(ref => conv.toPath(ref).toFile)
+    val files = frontendBuild.value.map(ref => conv.toPath(ref).toFile)
+    val missing = files.filterNot(_.exists())
+    if (missing.nonEmpty)
+      sys.error(
+        s"UI bundle is cached but ${missing.size} of ${files.size} files are " +
+          s"missing on disk (e.g. ${missing.head}). frontendTarget was " +
+          "modified outside the build; run `clean` to rebuild it."
+      )
+    files
   }
 
   /** Vite will not empty an outDir outside its own project root unless told to,
@@ -270,7 +322,13 @@ object FrontendPlugin extends AutoPlugin {
   private def outDirArgs(out: File): Seq[String] =
     Seq("--outDir", out.getAbsolutePath, "--emptyOutDir")
 
-  /** Runs a command to completion, failing the build on a non-zero exit. */
+  /** Runs a command to completion, failing the build on a non-zero exit.
+    *
+    * stderr maps to warn, not error: npm writes notices and progress there on
+    * perfectly successful runs, and error-level lines in a green build train
+    * people to ignore error-level lines. Failure is signalled by the exit
+    * code, which fails the task with the command attached.
+    */
   private def run(
       cmd: Seq[String],
       cwd: File,
@@ -278,7 +336,17 @@ object FrontendPlugin extends AutoPlugin {
       onFailure: String
   ): Unit = {
     log.debug(s"[frontend] ${cmd.mkString(" ")} (in $cwd)")
-    val code = Process(cmd, cwd) ! ProcessLogger(log.info(_), log.error(_))
+    val code =
+      try Process(cmd, cwd) ! ProcessLogger(log.info(_), log.warn(_))
+      catch {
+        // Surfaced when the binary itself is absent; the raw exception names a
+        // ProcessBuilder, not the actual problem.
+        case e: java.io.IOException =>
+          sys.error(
+            s"Could not start '${cmd.head}' -- is it installed and on the " +
+              s"PATH sbt was launched with? (${e.getMessage})"
+          )
+      }
     if (code != 0) sys.error(s"$onFailure (exit $code): ${cmd.mkString(" ")}")
   }
 
