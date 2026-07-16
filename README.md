@@ -42,7 +42,7 @@ For UI work, run Vite directly. This is the loop with hot module replacement:
 
 ```bash
 cd ui
-npm install     # first time only (or npm ci)
+npm ci          # first time only (npm install also works, but can rewrite the lock file)
 npm run dev
 ```
 
@@ -65,7 +65,7 @@ if you add API routes outside `/api`, add them to the proxy too.
 Other UI commands:
 
 ```bash
-npm run build    # production bundle (sbt does this for you; rarely needed by hand)
+npm run build    # writes to ui/dist, which Play never serves — use `sbt frontendBuild` instead
 npm run lint
 npm run preview  # serve a production build locally
 ```
@@ -89,60 +89,69 @@ npm run preview  # serve a production build locally
 ```scala
 Compile / resourceGenerators += frontendResources.taskValue
 ```
-5. That generator asks for the bundle — line 223 — and `frontendBuild.value` is what forces the build:
+5. That generator is `frontendResources`, and its `frontendBuild.value` is what forces the build.
+   It does two more things: it converts the cached refs back to the `Seq[File]` that
+   `resourceGenerators` expects, and — because it is deliberately uncached and so runs on every
+   build — it verifies the bundle files actually exist on disk, restoring any missing ones from
+   the cache store (see the caching section below for why that check has to exist).
 
-```scala
-private def frontendResources = Def.task {
-  val conv = fileConverter.value
-  frontendBuild.value.map(ref => conv.toPath(ref).toFile)   // <- forces the build
-}
-```
+6. `frontendBuild` runs Vite — or doesn't. It's a `Def.cachedTask` keyed on the content hashes of
+   `frontendSources`. Changed → runs `npm run build -- --outDir …` into `frontendTarget`.
+   Unchanged → restores the bundle from sbt's cache and Vite never starts.
 
-6. `frontendBuild` runs Vite — line 204 — or doesn't. It's a `Def.cachedTask` keyed on the content hashes of frontendSources. Changed → runs `npm run build -- --outDir` … (line 214). Unchanged → restores the bundle from sbt's cache and Vite never starts.
-
-7. The output is already in the right place. `frontendTarget` is `resourceManaged/public` (line 111), so those files are managed resources.
+7. The output is already in the right place. `frontendTarget` is
+   `(Compile / resourceManaged) / "public"`, so those files are managed resources.
 
 ```sh
 sbt run → classpath → Compile/products → resources → managedResources
         → resourceGenerators → frontendResources → frontendBuild → vite build
 ```
 
+`inspect` confirms the chain from sbt's own dependency graph (output abridged — the full dump
+includes line numbers and cache plumbing that drift with edits):
+
 ```sh
 [chirper] $ inspect frontendBuild
 [info] Task: Seq[interface xsbti.HashedVirtualFileRef]
-[info] Description:
-[info]  Builds the UI bundle. Cached on UI source contents.
-[info] Provided by:
-[info]  frontendBuild
-[info] Defined at:
-[info]  FrontendPlugin.scala:144
 [info] Dependencies:
-[info]  state
-[info]  frontendBuild / streams
-[info]  frontendDirectory
-[info]  fileConverter
-[info]  frontendSources
-[info]  localDigestCacheByteSize
-[info]  cacheVersion
-[info]  frontendInstall
-[info]  frontendBuildCommand
-[info]  frontendTarget
+[info]  frontendSources        <- the cache key
+[info]  frontendInstall        <- npm ci gate; runs every build, cache hit or not
+[info]  frontendBuildCommand, frontendTarget, frontendDirectory
 [info] Reverse dependencies:
+[info]  frontendResources      <- the resource generator (next hop)
 [info]  frontendBuild / dynamicFileOutputs
+
+[chirper] $ inspect frontendResources
+[info] Task: Seq[class java.io.File]
+[info] Reverse dependencies:
 [info]  Compile / resourceGenerators
-[info] Delegates:
-[info]  frontendBuild
-[info]  ThisBuild / frontendBuild
-[info]  Global / frontendBuild
 ```
 
-`frontendSources` — the content hashes of `ui/`. This is the cache key.
+Note what is absent: `Compile / compile` is nowhere in the reverse chain, which is why
+`sbt compile` never builds the UI — only tasks that need resources (run, packageBin, stage, dist,
+test) reach it.
 
-sbt's cache is a content-addressed store: everything is a blob keyed by `sha256-<hash>-<size>`. A single file maps to that model directly, but a directory is a tree of files. sbt computes a hash for the directory by hashing the hashes of its contents, recursively. So if you change one file in `ui/src`, the hash of `ui/` changes, and `frontendBuild` runs again.
+`frontendSources` is the cache key. There is no recursive "hash of `ui/`": the `frontendBuild /
+fileInputs` globs enumerate specific files (`src/**`, `index.html`, the lock file, vite/tsconfig
+config, `.env*`), each file gets its own content hash, and that list of per-file hashes is what the
+cache key is built from. Change one byte in one matched file and the key changes; touch a file the
+globs don't match (say, `ui/eslint.config.js`) and it doesn't.
 
-`public.sbtdir.zip` is a symlink into `~/Library/Caches/sbt/v2/cas/`. sbt points at the blob rather than copying it. That's also why the whole `resource_managed/main/public` directory reports `0B` from `du` — every file in it is a symlink into the CAS, not a real file.
+After a build, everything under `resource_managed/main/public` — and the sibling
+`public.sbtdir.zip` archive — is a symlink into `~/Library/Caches/sbt/v2/cas/`. sbt points at the
+blob rather than copying it, which is why the whole directory reports `0B` from `du`.
 
-On a cache hit, sbt unzips it back into place — that's `DiskActionCacheStore.unpackageDirZip`
+On a cache hit after `clean`, sbt re-syncs the archive and unzips it back into place
+(`DiskActionCacheStore.unpackageDirZip`). But if the archive symlink is already present with the
+right digest, sbt trusts the directory contents without validating them — a hand-deleted
+`public/` would stay deleted through green builds. `frontendResources` closes that hole: it
+re-checks every bundle file on disk on every build and restores missing ones from the CAS.
+
+The `main` in that path comes from the configuration axis: scoping a path key to a config appends
+a subdirectory (`Compile` → `main`, `Test` → `test`), which is what keeps configs from writing
+over each other. `frontendTarget` uses the `Compile`-scoped value on purpose — a bundle outside
+`Compile / resourceManaged` would silently be dropped from the jar, because managed resources are
+rebased relative to it:
 
 ```sh
 [chirper] $ show resourceManaged
@@ -153,3 +162,43 @@ On a cache hit, sbt unzips it back into place — that's `DiskActionCacheStore.u
 [info] /Users/joabet/Desktop/Projects/chirper/target/out/jvm/scala-3.8.4/chirper/resource_managed/test
 [chirper] $ 
 ```
+
+### Why packageBin filters its mappings
+
+When `frontendBuild` declares its output directory, sbt's action cache drops an archive of the
+whole bundle *next to* that directory: `resource_managed/main/public.sbtdir.zip`, sitting beside
+`public/`. Because it's inside the managed-resource directory, packageBin's scan sweeps it into
+the jar — where it would be a complete second copy of every asset. The plugin filters it out of
+`Compile / packageBin / mappings`:
+
+```scala
+val out = frontendTarget.value.toPath              // …/resource_managed/main/public
+val prefix = out.getFileName.toString + "."        // "public."
+.filterNot { case (ref, _) =>
+  val p = conv.toPath(ref)
+  p.getParent == out.getParent &&                  // sits directly beside the bundle dir…
+  p.getFileName.toString.startsWith(prefix)        // …and is named "public.<anything>"
+}
+```
+
+It matches by *location* rather than by the `.sbtdir.zip` extension on purpose: the extension is
+an sbt-internal constant (`ActionCache.dirZipExt` is `private[sbt]`, so it can only be copied,
+not referenced), and a hardcoded copy fails silently if sbt ever renames it — no error, the jar
+just doubles. Only the action cache writes siblings of a declared output directory, so the
+location is the stable part.
+
+### What the cache stores
+
+sbt 2 keeps a build cache at `~/Library/Caches/sbt/v2/` — outside your project, shared by every sbt 2 project on your machine, and untouched by `clean` (which only deletes `target/`).  It has two halves:
+- `cas/` — the content-addressed store. Every file is named by the `SHA-256` of its own contents plus its size, like `sha256-183bcc…-452`. Nothing here knows what project or filename the content belonged to; it's just bytes filed under their own fingerprint.
+- `ac/` — the action cache. Entries here are keyed by a hash of a task's inputs (your UI source hashes + the task's code + the command settings)
+
+So a cache lookup is: hash the inputs → look in `ac/` → follow the pointers into `cas/`.
+
+When `frontendBuild` runs for real, one cache entry gets written, and your UI ends up in the store in three shapes — each existing to answer a different question later:
+
+1. The return value, as JSON. `frontendBuild` returns a list of file references. That list is serialized and stored, so on a hit sbt can hand the downstream tasks their answer without running anything. This is why the whole `import sbt.util.CacheImplicits.given` dance exists at the top of the plugin — the return type had to be serializable to be storable.
+
+2. The whole bundle as one zip (`public.sbtdir.zip`, 85KB). A directory can't have a single content hash — its file names change every build (`index-DfKp6xNp.js` → `index-KZ8fgVzg.js`). So Def.declareOutputDirectory makes sbt zip the directory into one addressable blob. This is the unit of restore-after-clean, and the unit a remote cache would ship to a CI machine that never built the UI.
+
+3. Every individual file as its own blob. When sbt unpacks that zip, `unpackageDirZip` calls `putBlob` on each file it extracts — so `index.html` and each `JS`/`CSS`/`SVG` file get filed in the CAS independently, on top of being inside the zip. sbt does this for its own bookkeeping, but it's what makes `frontendResources`'s self-heal possible: if the bundle directory is deleted by hand, the plugin asks the store for exactly the missing files by their hashes and re-links them — no vite run, no `clean`.

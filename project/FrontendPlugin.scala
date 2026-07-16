@@ -295,24 +295,40 @@ object FrontendPlugin extends AutoPlugin {
   /** Adapts the cached bundle back to the `Seq[File]` that resourceGenerators
     * still expects.
     *
-    * The existence check is not paranoia. On a cache hit `frontendBuild` reruns
-    * nothing and sbt does not re-materialize a declared output directory that
-    * was deleted by hand -- the refs come back but the files are gone, and
-    * without this check `packageBin` ships a jar with no UI in it and a green
-    * build (observed, not theorized). Failing here converts that into a loud
-    * error naming the fix.
+    * The existence check is not paranoia. On a cache hit sbt only re-syncs the
+    * bundle's `.sbtdir.zip` archive, and `syncFile` returns without unpacking
+    * when that archive is already in place with a matching digest -- the
+    * *contents* of the directory are never validated (ActionCacheStore.scala,
+    * `afterFileWrite` only fires on a rewrite). So a hand-deleted
+    * frontendTarget stays deleted through any number of green builds, and
+    * without this check `packageBin` ships a jar with no UI in it (observed,
+    * not theorized).
+    *
+    * Recovery is cheap because `unpackageDirZip` runs `putBlob` on every file
+    * it extracts: each bundle file sits individually in the CAS, so missing
+    * files are restored with `syncBlobs` -- no vite run, no `clean`. The error
+    * remains only for the case where the CAS itself no longer has the blobs.
     */
   private def resourcesTask = Def.task {
+    val log = streams.value.log
     val conv = fileConverter.value
-    val files = frontendBuild.value.map(ref => conv.toPath(ref).toFile)
-    val missing = files.filterNot(_.exists())
-    if (missing.nonEmpty)
-      sys.error(
-        s"UI bundle is cached but ${missing.size} of ${files.size} files are " +
-          s"missing on disk (e.g. ${missing.head}). frontendTarget was " +
-          "modified outside the build; run `clean` to rebuild it."
+    val cacheConfig = Def.cacheConfiguration.value
+    val refs = frontendBuild.value
+    val missing = refs.filterNot(ref => conv.toPath(ref).toFile.exists())
+    if (missing.nonEmpty) {
+      log.info(
+        s"[frontend] ${missing.size} bundle files missing from disk; restoring from cache"
       )
-    files
+      val restored =
+        cacheConfig.store.syncBlobs(missing, cacheConfig.outputDirectory)
+      if (restored.size != missing.size)
+        sys.error(
+          s"UI bundle is cached but ${missing.size - restored.size} files are " +
+            "missing from both disk and the cache store. frontendTarget was " +
+            "modified outside the build; run `clean` to rebuild it."
+        )
+    }
+    refs.map(ref => conv.toPath(ref).toFile)
   }
 
   /** Vite will not empty an outDir outside its own project root unless told to,
@@ -326,8 +342,8 @@ object FrontendPlugin extends AutoPlugin {
     *
     * stderr maps to warn, not error: npm writes notices and progress there on
     * perfectly successful runs, and error-level lines in a green build train
-    * people to ignore error-level lines. Failure is signalled by the exit
-    * code, which fails the task with the command attached.
+    * people to ignore error-level lines. Failure is signalled by the exit code,
+    * which fails the task with the command attached.
     */
   private def run(
       cmd: Seq[String],
