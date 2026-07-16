@@ -1,0 +1,15 @@
+# Routes
+# This file defines all application routes (Higher priority routes first)
+# ~~~~
+
+
+# The SPA shell. Everything the React app renders client-side ultimately loads this.
+GET     /                     controllers.UIController.index()
+
+# API paths must be matched before the catch-all below, so that an unknown /api/... path
+# returns a JSON 404 rather than being handed the HTML shell.
+GET     /api/*resource        controllers.UIController.unknown(resource: String)
+
+# Catch-all: a real static asset is served from /public, anything else is assumed to be a
+# client-side route and is given the shell so React Router can take over.
+GET     /*resource            controllers.UIController.assetOrDefault(resource: String)

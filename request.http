@@ -1,0 +1,80 @@
+### Collection of requests for testing the API
+
+@host = http://localhost:9000
+
+
+### The SPA shell.
+GET {{host}}/
+
+### index.html by name — same shell, reached as a static asset rather than via the / route.
+GET {{host}}/index.html
+
+
+############################################################
+# Client-side routes: no known asset extension, so React Router gets the shell (200 + HTML)
+############################################################
+
+### A plain client-side route.
+GET {{host}}/chirps
+
+### Nested client-side route.
+GET {{host}}/user/jane/chirps
+
+### Route with a dot in it. The extension whitelist must NOT mistake `.doe` for an asset type,
+### or this 404s instead of reaching React Router. This is why the whitelist is closed rather
+### than "anything with a dot".
+GET {{host}}/user/jane.doe
+
+
+############################################################
+# API: must never fall through to the HTML shell
+############################################################
+
+### Unknown API path -> JSON 404 {"success":false,"error":"chirps not found"}
+GET {{host}}/api/chirps
+
+### Deeper unknown API path -> JSON 404, body names the full resource.
+GET {{host}}/api/chirps/42/replies
+
+### An /api path that looks like an asset. Route order decides this, not the extension:
+### /api/*resource is matched before the catch-all, so this is still a JSON 404.
+GET {{host}}/api/data.json
+
+
+############################################################
+# Static assets
+############################################################
+
+### Copied verbatim from ui/public. Keeps its name across releases, so it must revalidate.
+### expect: Cache-Control: public, max-age=0, must-revalidate
+GET {{host}}/favicon.svg
+
+### Same — referenced by App.tsx via <use href="/icons.svg#...">
+GET {{host}}/icons.svg
+
+### Content-hashed bundle -> immutable for a year.
+### expect: Cache-Control: public, max-age=31536000, immutable
+### NOTE: this filename changes on every UI change. Read the current one from `GET /` first.
+GET {{host}}/assets/index-DfKp6xNp.js
+
+### Content-hashed stylesheet — same caching rules.
+GET {{host}}/assets/index-D64VDMd1.css
+
+
+############################################################
+# Missing assets & traversal — none of these serve the shell or leak a file
+############################################################
+
+### Known extension, no such file -> 404 (not the shell: a missing .js must fail loudly, not
+### return HTML the browser then chokes on).
+GET {{host}}/nope.png
+
+### Missing file under the hashed dir -> 404.
+GET {{host}}/assets/index-deadbeef.js
+
+### Raw traversal -> 404. A literal ".." routes to Assets, which rejects paths escaping /public.
+### (Use `curl --path-as-is`; many clients collapse the ".." before sending.)
+GET {{host}}/../conf/application.conf
+
+### Traversal that stays a known asset type -> 404 from Assets, not the shell.
+GET {{host}}/assets/../index.html
