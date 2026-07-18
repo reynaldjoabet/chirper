@@ -29,9 +29,11 @@ Global / onChangedBuildSource := ReloadOnSourceChanges
 lazy val root = (project in file("."))
   // PlayLayoutPlugin comes along automatically and is what puts sources in app/,
   // config in conf/ and static files in public/.
+  // PlayEbean enhances models.* bytecode at compile time (see ebean.default in application.conf)
+  // so Ebean can do lazy loading and dirty-property tracking.
   // FrontendPlugin builds ui/ with Vite onto the classpath at /public; it declares noTrigger, so
   // this is the only thing that turns it on.
-  .enablePlugins(PlayJava, FrontendPlugin)
+  .enablePlugins(PlayJava, PlayEbean, FrontendPlugin)
   .settings(
     name := "chirper",
 
@@ -48,9 +50,9 @@ lazy val root = (project in file("."))
     Universal / javaOptions += "-Dpidfile.path=/dev/null",
     libraryDependencies ++= Seq(
       guice,
-      // Persistence: plain JDBC through Play's Database API (HikariCP pool) with Evolutions
-      // managing the schema. H2 writes a file under ./data in dev; production swaps
-      // db.default.url/driver for Postgres without touching code.
+      // Persistence: the Ebean ORM (below) sits on top of Play's Database API (HikariCP pool,
+      // via javaJdbc) with Evolutions managing the schema. H2 writes a file under ./data in dev;
+      // production swaps db.default.url/driver for Postgres without touching code.
       javaJdbc,
       evolutions,
       "com.h2database" % "h2" % "2.3.232",

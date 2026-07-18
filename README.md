@@ -39,9 +39,10 @@ sbt --client dist             # zip for deployment
 ## API
 
 All endpoints answer `{"success":true,"data":...}` or `{"success":false,"error":"..."}`. Chirps
-persist in an H2 database (a file under `data/`, gitignored) through Play's pooled JDBC API;
-evolutions in `conf/evolutions/default/` manage the schema, and the dev database is seeded with
-three chirps on first boot only. `request.http` holds runnable examples of all of these.
+persist in an H2 database (a file under `data/`, gitignored) through the Ebean ORM on top of
+Play's pooled JDBC API; evolutions in `conf/evolutions/default/` manage the schema, and the dev
+database is seeded with three chirps on first boot only. `request.http` holds runnable examples of
+all of these.
 
 | Method | Path                    | What it does                                            |
 |--------|-------------------------|---------------------------------------------------------|

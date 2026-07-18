@@ -3,16 +3,19 @@ package controllers;
 import static java.util.concurrent.CompletableFuture.completedFuture;
 import static java.util.concurrent.CompletableFuture.supplyAsync;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.inject.Inject;
 import java.util.Optional;
 import java.util.concurrent.CompletionStage;
 import java.util.regex.Pattern;
-import models.Chirp;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import jakarta.inject.Inject;
+import models.Chirp;
 import play.libs.Json;
 import play.mvc.Controller;
 import play.mvc.Http;
@@ -25,12 +28,12 @@ import repository.DatabaseExecutionContext;
  * {@code {"success":true,"data":...}} on success, {@code {"success":false,"error":"..."}} on
  * failure, so a client can branch on {@code success} without caring which controller answered.
  *
- * <p>Repository calls block on JDBC, so every one of them is dispatched to
+ * <p>Repository calls block on Ebean/JDBC, so every one of them is dispatched to
  * {@link DatabaseExecutionContext} via supplyAsync — the default dispatcher never waits on a
  * connection. Validation failures short-circuit before touching the database.
  *
- * <p>JSON is built by hand with ObjectNode rather than reflective {@code Json.toJson(record)}: the
- * wire format stays pinned even if the record grows fields, and Instant needs no Jackson module
+ * <p>JSON is built by hand with ObjectNode rather than reflective {@code Json.toJson(entity)}: the
+ * wire format stays pinned even if the entity grows fields, and Instant needs no Jackson module
  * this way. GETs are marked no-store — timelines change constantly and an intermediary caching a
  * JSON body would serve deleted chirps.
  */
@@ -92,7 +95,7 @@ public class ChirpController extends Controller {
     return supplyAsync(() -> chirps.create(author, body), ec)
         .thenApply(
             chirp -> {
-              log.info("chirp {} created by @{}", chirp.id(), chirp.author());
+              log.info("chirp {} created by @{}", chirp.id, chirp.author);
               return created(envelope(toJson(chirp)));
             });
   }
@@ -121,11 +124,11 @@ public class ChirpController extends Controller {
 
   private static ObjectNode toJson(Chirp c) {
     ObjectNode node = Json.newObject();
-    node.put("id", c.id());
-    node.put("author", c.author());
-    node.put("body", c.body());
-    node.put("createdAt", c.createdAt().toString()); // ISO-8601, e.g. 2026-07-17T09:15:30Z
-    node.put("likes", c.likes());
+    node.put("id", c.id);
+    node.put("author", c.author);
+    node.put("body", c.body);
+    node.put("createdAt", c.createdAt.toString()); // ISO-8601, e.g. 2026-07-17T09:15:30Z
+    node.put("likes", c.likes);
     return node;
   }
 

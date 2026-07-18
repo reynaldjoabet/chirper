@@ -14,8 +14,10 @@ import static play.test.Helpers.POST;
 import static play.test.Helpers.contentAsString;
 import static play.test.Helpers.route;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.Test;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
 import play.libs.Json;
 import play.mvc.Http;
 import play.mvc.Result;
@@ -23,7 +25,7 @@ import play.test.WithApplication;
 
 /**
  * Routes real requests through the whole stack: router, CSRF config, controller, dispatcher, and
- * the real JDBC repository against H2. Each test gets a fresh application and its own uniquely
+ * the real Ebean repository against H2. Each test gets a fresh application and its own uniquely
  * named in-memory database (evolutions apply the schema on startup), so tests are isolated and
  * independent of dev seed data — seeding is dev-mode only and test apps run in test mode.
  */
