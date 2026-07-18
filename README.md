@@ -36,6 +36,40 @@ sbt --client stage            # full app + UI -> target/.../universal/stage
 sbt --client dist             # zip for deployment
 ```
 
+## API
+
+All endpoints answer `{"success":true,"data":...}` or `{"success":false,"error":"..."}`. Chirps
+persist in an H2 database (a file under `data/`, gitignored) through Play's pooled JDBC API;
+evolutions in `conf/evolutions/default/` manage the schema, and the dev database is seeded with
+three chirps on first boot only. `request.http` holds runnable examples of all of these.
+
+| Method | Path                    | What it does                                            |
+|--------|-------------------------|---------------------------------------------------------|
+| GET    | `/api/chirps`           | Timeline, newest first. `?author=handle` filters.       |
+| POST   | `/api/chirps`           | `{"author","body"}` → 201. Handle `[A-Za-z0-9_]{1,15}`, body ≤ 280 chars. |
+| GET    | `/api/chirps/:id`       | One chirp, or a JSON 404.                               |
+| POST   | `/api/chirps/:id/like`  | Increments likes; returns the updated chirp.            |
+| DELETE | `/api/chirps/:id`       | 204, or a JSON 404.                                     |
+
+There is no auth: the "current user" is whatever handle the UI has in its compose box. Unknown
+`/api/...` paths return a JSON 404 rather than the HTML shell. The 280 limit counts code points,
+so an emoji costs 1, not 2 — the UI counter uses the same rule.
+
+## Deployment configuration
+
+Everything deployment-specific is an environment variable; the checked-in defaults only serve
+local dev:
+
+| Variable | Purpose |
+|---|---|
+| `APPLICATION_SECRET` | Overrides the (public) dev secret in application.conf. Set it in any real deployment. |
+| `ALLOWED_HOST` | Adds your domain to the Host-header allowlist (dev allows only localhost). |
+| `DATABASE_JDBC_URL` | Overrides the dev H2 url. **Required in production**: the dev url is a relative path, and the staged start script resolves it against its own directory, not yours — two launch directories silently mean two databases. Use an absolute H2 path or a Postgres url. |
+| `DATABASE_DRIVER` / `DATABASE_USERNAME` / `DATABASE_PASSWORD` | Set alongside `DATABASE_JDBC_URL` when moving off H2 (e.g. `org.postgresql.Driver`). |
+
+Blocking JDBC runs on a dedicated `database.dispatcher` pool sized to match HikariCP's
+connections, so slow queries queue there instead of starving request handling.
+
 ## Running the UI
 
 For UI work, run Vite directly. This is the loop with hot module replacement:

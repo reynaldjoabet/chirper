@@ -6,6 +6,18 @@
 # The SPA shell. Everything the React app renders client-side ultimately loads this.
 GET     /                     controllers.UIController.index()
 
+# The chirp API. Declared before the /api/*resource fallback so unknown /api paths still get a
+# JSON 404. The + nocsrf modifier exempts the unsafe methods from Play's CSRF filter: this is a
+# token-less JSON API and the React client sends no CSRF token.
+GET     /api/chirps           controllers.ChirpController.list(request: Request)
++ nocsrf
+POST    /api/chirps           controllers.ChirpController.create(request: Request)
+GET     /api/chirps/:id       controllers.ChirpController.get(id: Long)
++ nocsrf
+POST    /api/chirps/:id/like  controllers.ChirpController.like(id: Long)
++ nocsrf
+DELETE  /api/chirps/:id       controllers.ChirpController.delete(id: Long)
+
 # API paths must be matched before the catch-all below, so that an unknown /api/... path
 # returns a JSON 404 rather than being handed the HTML shell.
 GET     /api/*resource        controllers.UIController.unknown(resource: String)

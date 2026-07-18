@@ -48,9 +48,21 @@ lazy val root = (project in file("."))
     Universal / javaOptions += "-Dpidfile.path=/dev/null",
     libraryDependencies ++= Seq(
       guice,
+      // Persistence: plain JDBC through Play's Database API (HikariCP pool) with Evolutions
+      // managing the schema. H2 writes a file under ./data in dev; production swaps
+      // db.default.url/driver for Postgres without touching code.
+      javaJdbc,
+      evolutions,
+      "com.h2database" % "h2" % "2.3.232",
       "jakarta.inject" % "jakarta.inject-api" % "2.0.1",
       "com.outr" %% "scribe" % "3.19.0",
+      "org.playframework" %% "play-ebean" % "9.0.0-M2",
+      "de.dentrassi.crypto" % "pem-keystore" % "3.0.0",
       "com.outr" %% "scribe-slf4j" % "3.19.0",
-      munit % Test
+      munit % Test,
+      // play-test (from the Play plugin) provides WithApplication and JUnit 4 itself, but sbt
+      // only *detects* JUnit tests through this framework adapter — without it `sbt test`
+      // compiles the tests and then reports "Total 0".
+      "com.github.sbt" % "junit-interface" % "0.13.3" % Test
     )
   )

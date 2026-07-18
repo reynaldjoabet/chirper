@@ -27,13 +27,43 @@ GET {{host}}/user/jane.doe
 
 
 ############################################################
-# API: must never fall through to the HTML shell
+# The chirp API. Every response is {"success":true,"data":...} or
+# {"success":false,"error":"..."}. Chirps persist in H2 (./data) across restarts; the dev
+# database is seeded with three chirps on first boot only.
 ############################################################
 
-### Unknown API path -> JSON 404 {"success":false,"error":"chirps not found"}
+### Timeline, newest first. Seeded with three chirps on boot.
 GET {{host}}/api/chirps
 
-### Deeper unknown API path -> JSON 404, body names the full resource.
+### Only one author's chirps.
+GET {{host}}/api/chirps?author=ada
+
+### Post a chirp -> 201. Handle: 1-15 of [A-Za-z0-9_]; body: 1-280 chars.
+POST {{host}}/api/chirps
+Content-Type: application/json
+
+{"author": "joabet", "body": "hello from request.http"}
+
+### One chirp by id (seeded ids start at 1).
+GET {{host}}/api/chirps/1
+
+### Like -> 200 with the updated chirp.
+POST {{host}}/api/chirps/1/like
+
+### Delete -> 204, then a GET of the same id 404s.
+DELETE {{host}}/api/chirps/3
+
+### Validation: bad handle -> 400 with the reason.
+POST {{host}}/api/chirps
+Content-Type: application/json
+
+{"author": "has spaces", "body": "x"}
+
+############################################################
+# Unknown API paths: must never fall through to the HTML shell
+############################################################
+
+### Unknown path under /api -> JSON 404, body names the resource.
 GET {{host}}/api/chirps/42/replies
 
 ### An /api path that looks like an asset. Route order decides this, not the extension:

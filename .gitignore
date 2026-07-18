@@ -1,4 +1,6 @@
 logs
+# H2 database files (dev persistence; production points db.default.url elsewhere)
+/data/
 # macOS
 .DS_Store
 
