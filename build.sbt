@@ -4,26 +4,25 @@ ThisBuild / name := """chirper"""
 ThisBuild / organization := "com.chirper"
 ThisBuild / scalaVersion := "3.8.4"
 ThisBuild / version := "0.1.0-SNAPSHOT"
+ThisBuild / semanticdbEnabled := true
 
-ThisBuild / scalacOptions ++= Seq(
+ThisBuild / scalacOptions := Seq(
+  "-encoding",
+  "UTF-8",
   "-no-indent",
   "-deprecation",
   "-feature",
   "-unchecked",
-  "-explain", // + actionable error messages
-  "-source:3.3", // + pin source level, no silent drift
-  // "-Wunused:all",
+  "-source:3.3",
+  "-java-output-version:17",
   "-Wvalue-discard",
   "-Wnonunit-statement",
+  "-Wshadow:all",
   "-Wsafe-init",
-  "-language:strictEquality", // + catch nonsensical == (Money vs String, etc.)
-  "-Xkind-projector",
-  "-Xmax-inlines",
-  "64"
+  "-Xcheck-macros",
+  "-Xmax-inlines:64"
 )
 
-// Reload the build automatically when build.sbt or project/*.scala changes, rather than printing
-// a warning and quietly running against the stale definition until someone types `reload`.
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
 lazy val root = (project in file("."))
@@ -31,11 +30,15 @@ lazy val root = (project in file("."))
   // config in conf/ and static files in public/.
   // PlayEbean enhances models.* bytecode at compile time (see ebean.default in application.conf)
   // so Ebean can do lazy loading and dirty-property tracking.
-  // FrontendPlugin builds ui/ with Vite onto the classpath at /public; it declares noTrigger, so
-  // this is the only thing that turns it on.
+  // FrontendPlugin builds ui/ (the vendored twitter-spring-reactjs CRA app, see PORTING.md) onto
+  // the classpath at /public; it declares noTrigger, so this is the only thing that turns it on.
   .enablePlugins(PlayJava, PlayEbean, FrontendPlugin)
   .settings(
     name := "chirper",
+
+    // The vendored frontend's 2021-era dependency tree needs npm's pre-npm-7 peer-dependency
+    // behavior; a plain `npm ci` fails on peer conflicts before it installs anything.
+    frontendInstallCommand := Seq("npm", "ci", "--legacy-peer-deps"),
 
     // The reverse routers exist to build URLs from Twirl/Scala, and the JS one to feed Play's
     // jsRoutes. A Vite-built React SPA can use neither: it knows its own URLs, and its bundle is
@@ -56,6 +59,8 @@ lazy val root = (project in file("."))
       javaJdbc,
       evolutions,
       "com.h2database" % "h2" % "2.3.232",
+      // Password hashing (maintained bcrypt implementation; jbcrypt has been dormant since 2015)
+      "at.favre.lib" % "bcrypt" % "0.10.2",
       "jakarta.inject" % "jakarta.inject-api" % "2.0.1",
       "com.outr" %% "scribe" % "3.19.0",
       "org.playframework" %% "play-ebean" % "9.0.0-M2",
