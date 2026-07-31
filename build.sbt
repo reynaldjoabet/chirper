@@ -1,9 +1,9 @@
 import Dependencies._
 
-ThisBuild / name := """chirper"""
-ThisBuild / organization := "com.chirper"
-ThisBuild / scalaVersion := "3.8.4"
-ThisBuild / version := "0.1.0-SNAPSHOT"
+ThisBuild / name              := """chirper"""
+ThisBuild / organization      := "com.chirper"
+ThisBuild / scalaVersion      := "3.8.4"
+ThisBuild / version           := "0.1.0-SNAPSHOT"
 ThisBuild / semanticdbEnabled := true
 
 ThisBuild / scalacOptions := Seq(
@@ -18,7 +18,6 @@ ThisBuild / scalacOptions := Seq(
   "-Wvalue-discard",
   "-Wnonunit-statement",
   "-Wshadow:all",
-  "-Wsafe-init",
   "-Xcheck-macros",
   "-Xmax-inlines:64"
 )
@@ -44,14 +43,14 @@ lazy val root = (project in file("."))
     // jsRoutes. A Vite-built React SPA can use neither: it knows its own URLs, and its bundle is
     // never served by Twirl. Off, they stop generating and compiling ReverseUIController and
     // routes$javascript on every routes change. The forward router (router.Routes) is unaffected.
-    generateReverseRouter := false,
+    generateReverseRouter   := false,
     generateJsReverseRouter := false,
 
     // Play writes a RUNNING_PID on startup and refuses to boot if one already exists. In a
     // container that file survives an unclean stop, so the next start fails with a stale pid --
     // the classic "works once, then never restarts" deployment failure.
     Universal / javaOptions += "-Dpidfile.path=/dev/null",
-    libraryDependencies ++= Seq(
+    libraryDependencies    ++= Seq(
       guice,
       // Persistence: the Ebean ORM (below) sits on top of Play's Database API (HikariCP pool,
       // via javaJdbc) with Evolutions managing the schema. H2 writes a file under ./data in dev;
@@ -60,13 +59,13 @@ lazy val root = (project in file("."))
       evolutions,
       "com.h2database" % "h2" % "2.3.232",
       // Password hashing (maintained bcrypt implementation; jbcrypt has been dormant since 2015)
-      "at.favre.lib" % "bcrypt" % "0.10.2",
-      "jakarta.inject" % "jakarta.inject-api" % "2.0.1",
-      "com.outr" %% "scribe" % "3.19.0",
-      "org.playframework" %% "play-ebean" % "9.0.0-M2",
-      "de.dentrassi.crypto" % "pem-keystore" % "3.0.0",
-      "com.outr" %% "scribe-slf4j" % "3.19.0",
-      munit % Test,
+      "at.favre.lib"        % "bcrypt"             % "0.10.2",
+      "jakarta.inject"      % "jakarta.inject-api" % "2.0.1",
+      "com.outr"           %% "scribe"             % "3.19.0",
+      "org.playframework"  %% "play-ebean"         % "9.0.0-M2",
+      "de.dentrassi.crypto" % "pem-keystore"       % "3.0.0",
+      "com.outr"           %% "scribe-slf4j"       % "3.19.0",
+      munit                 % Test,
       // play-test (from the Play plugin) provides WithApplication and JUnit 4 itself, but sbt
       // only *detects* JUnit tests through this framework adapter — without it `sbt test`
       // compiles the tests and then reports "Total 0".

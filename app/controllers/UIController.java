@@ -23,14 +23,14 @@ import play.mvc.Result;
  */
 public class UIController extends Controller {
 
-  // Directories whose contents are content-hashed by the Vite build. A changed file always gets a
+  // Directories whose contents are content-hashed by the build. A changed file always gets a
   // new URL, so these can be cached forever ("immutable").
   //
-  // This is Vite's default output layout: JS, CSS and imported assets all land in assets/ with a
-  // hash in the filename. Files copied verbatim from ui/public (favicon.svg, icons.svg) land at
-  // the root instead and keep their names across releases, so the prefix test correctly excludes
-  // them. Overriding rollupOptions.output.*FileNames in vite.config.ts means updating this set.
-  private static final Set<String> HASHED_ASSET_DIRS = Set.of("assets/");
+  // This is CRA's (react-scripts) output layout for the vendored twitter frontend: hashed JS,
+  // CSS and media land under static/. Files copied verbatim from ui/public keep their names
+  // across releases and land at the root, so the prefix test correctly excludes them.
+  private static final Set<String> HASHED_ASSET_DIRS =
+      Set.of("static/js/", "static/css/", "static/media/");
 
   // File extensions that identify a request for a real static asset. Anything else is assumed
   // to be a client-side route and is served the SPA shell instead.

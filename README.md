@@ -2,8 +2,9 @@
 
 A chirp is a short bird sound, users post short messages called chirps.
 
-A Play (Java) backend in `app/`, and a React + Vite UI in `ui/`. `FrontendPlugin` (in
-`project/FrontendPlugin.scala`) builds the UI with Vite and puts the bundle on the classpath at
+A Play (Java) backend in `app/`, and a React UI in `ui/` — the vendored twitter-spring-reactjs
+frontend being ported endpoint-by-endpoint (see PORTING.md). `FrontendPlugin` (in
+`project/FrontendPlugin.scala`) builds the UI and puts the bundle on the classpath at
 `/public`, where `UIController` serves it. There is no checked-in build output and nothing to
 copy by hand: `sbt run`, `sbt stage` and `sbt dist` all build the UI as part of the normal build.
 
@@ -52,9 +53,25 @@ all of these.
 | POST   | `/api/chirps/:id/like`  | Increments likes; returns the updated chirp.            |
 | DELETE | `/api/chirps/:id`       | 204, or a JSON 404.                                     |
 
-There is no auth: the "current user" is whatever handle the UI has in its compose box. Unknown
-`/api/...` paths return a JSON 404 rather than the HTML shell. The 280 limit counts code points,
-so an emoji costs 1, not 2 — the UI counter uses the same rule.
+Auth is session-based. Register or log in and Play sets a signed, HttpOnly, SameSite=Lax session
+cookie holding the handle; the browser sends it automatically (including through the Vite dev
+proxy), so there are no tokens in the client. Passwords are bcrypt-hashed (cost 12) and never
+serialized. Login and register fail with the same message, so the API does not reveal which
+handles exist.
+
+| Method | Path                 | What it does                                                  |
+|--------|----------------------|---------------------------------------------------------------|
+| POST   | `/api/auth/register` | `{"handle","password"}` → 201 + session. 409 if taken; password ≥ 8 chars. |
+| POST   | `/api/auth/login`    | Verifies and sets the session → 200, or 401.                  |
+| POST   | `/api/auth/logout`   | Clears the session → 204.                                     |
+| GET    | `/api/auth/me`       | The signed-in user, or 401. The UI calls this on load.        |
+
+Writes are authenticated: `POST /api/chirps` takes its author from the session (a body-supplied
+author is ignored) and answers 401 anonymously; `DELETE` additionally answers 403 for chirps you
+don't own. Reads stay public. Chirps that predate accounts keep their display-only authors.
+
+Unknown `/api/...` paths return a JSON 404 rather than the HTML shell. The 280 limit counts code
+points, so an emoji costs 1, not 2 — the UI counter uses the same rule.
 
 ## Deployment configuration
 
@@ -73,36 +90,23 @@ connections, so slow queries queue there instead of starving request handling.
 
 ## Running the UI
 
-For UI work, run Vite directly. This is the loop with hot module replacement:
+For UI work, run the CRA dev server directly. This is the loop with hot reload:
 
 ```bash
 cd ui
-npm ci          # first time only (npm install also works, but can rewrite the lock file)
-npm run dev
+npm ci --legacy-peer-deps   # 2021-era peer deps; plain npm ci fails
+npm start                   # CRA dev server on :3000
 ```
 
-Vite serves on <http://localhost:5173> with HMR — changes appear immediately, without a rebuild or
-a refresh. Open `:5173`, not `:9000`, while doing UI work.
-
-Because the browser is now talking to Vite rather than Play, API calls need forwarding back to the
-backend. `ui/vite.config.ts` already does this:
-
-```ts
-server: {
-  proxy: { '/api': 'http://localhost:9000' },
-}
-```
-
-So run `sbt --client run` **as well** if you need the API — `:5173` for the UI, and it forwards
-`/api/*` to Play on `:9000` behind the scenes. The prefix matches the `/api` route in `conf/routes`;
-if you add API routes outside `/api`, add them to the proxy too.
+The dev server proxies API calls to Play via `"proxy": "http://localhost:9000"` in
+`ui/package.json`, so run `sbt --client run` as well — `:3000` for the UI with hot reload, and
+`/ui/v1/*` requests are forwarded to Play behind the scenes.
 
 Other UI commands:
 
 ```bash
-npm run build    # writes to ui/dist, which Play never serves — use `sbt frontendBuild` instead
-npm run lint
-npm run preview  # serve a production build locally
+npm run build      # what sbt frontendBuild runs: scripts/sbt-build.js (CRA build + sync to --outDir)
+npm run build:cra  # upstream's plain react-scripts build, writes ui/build (Play never serves it)
 ```
 
 

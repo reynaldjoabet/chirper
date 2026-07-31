@@ -38,11 +38,30 @@ GET {{host}}/api/chirps
 ### Only one author's chirps.
 GET {{host}}/api/chirps?author=ada
 
-### Post a chirp -> 201. Handle: 1-15 of [A-Za-z0-9_]; body: 1-280 chars.
+### Register (sets the session cookie; your client must keep cookies for the requests below).
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{"handle": "joabet", "password": "request-http-pw"}
+
+### Log in (same body; 401 on a wrong password or unknown handle, identical message).
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{"handle": "joabet", "password": "request-http-pw"}
+
+### Who am I? 401 when not signed in.
+GET {{host}}/api/auth/me
+
+### Post a chirp -> 201. Author comes from the session; body: 1-280 code points.
+### Without a session this is 401.
 POST {{host}}/api/chirps
 Content-Type: application/json
 
-{"author": "joabet", "body": "hello from request.http"}
+{"body": "hello from request.http"}
+
+### Log out -> 204, session cleared.
+POST {{host}}/api/auth/logout
 
 ### One chirp by id (seeded ids start at 1).
 GET {{host}}/api/chirps/1
@@ -50,14 +69,14 @@ GET {{host}}/api/chirps/1
 ### Like -> 200 with the updated chirp.
 POST {{host}}/api/chirps/1/like
 
-### Delete -> 204, then a GET of the same id 404s.
-DELETE {{host}}/api/chirps/3
+### Delete your own chirp -> 204 (someone else's -> 403, anonymous -> 401).
+DELETE {{host}}/api/chirps/4
 
-### Validation: bad handle -> 400 with the reason.
-POST {{host}}/api/chirps
+### Validation: register with an illegal handle -> 400 with the reason.
+POST {{host}}/api/auth/register
 Content-Type: application/json
 
-{"author": "has spaces", "body": "x"}
+{"handle": "has spaces", "password": "long-enough-pw"}
 
 ############################################################
 # Unknown API paths: must never fall through to the HTML shell

@@ -5,9 +5,11 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static play.mvc.Http.Status.BAD_REQUEST;
 import static play.mvc.Http.Status.CREATED;
+import static play.mvc.Http.Status.FORBIDDEN;
 import static play.mvc.Http.Status.NOT_FOUND;
 import static play.mvc.Http.Status.NO_CONTENT;
 import static play.mvc.Http.Status.OK;
+import static play.mvc.Http.Status.UNAUTHORIZED;
 import static play.test.Helpers.DELETE;
 import static play.test.Helpers.GET;
 import static play.test.Helpers.POST;
@@ -53,8 +55,14 @@ public class ChirpControllerTest extends WithApplication {
   }
 
   private JsonNode createChirp(String author, String body) {
-    Result result =
-        routeJson(POST, "/api/chirps", Json.newObject().put("author", author).put("body", body));
+    // Authorship comes from the session, so the helper signs the request as `author`.
+    Http.RequestBuilder request =
+        new Http.RequestBuilder()
+            .method(POST)
+            .uri("/api/chirps")
+            .session("handle", author)
+            .bodyJson(Json.newObject().put("body", body));
+    Result result = route(app, request);
     assertEquals(CREATED, result.status());
     JsonNode json = parse(result);
     assertTrue(json.get("success").asBoolean());
@@ -102,26 +110,66 @@ public class ChirpControllerTest extends WithApplication {
 
   @Test
   public void createValidatesInput() {
-    // Handle with illegal characters.
-    Result badAuthor =
-        routeJson(POST, "/api/chirps", Json.newObject().put("author", "no spaces").put("body", "x"));
-    assertEquals(BAD_REQUEST, badAuthor.status());
-    assertFalse(parse(badAuthor).get("success").asBoolean());
-
     // Blank body.
     Result blankBody =
-        routeJson(POST, "/api/chirps", Json.newObject().put("author", "ok").put("body", "   "));
+        route(
+            app,
+            new Http.RequestBuilder()
+                .method(POST)
+                .uri("/api/chirps")
+                .session("handle", "ok")
+                .bodyJson(Json.newObject().put("body", "   ")));
     assertEquals(BAD_REQUEST, blankBody.status());
 
     // Over the 280 limit.
     Result tooLong =
-        routeJson(
-            POST, "/api/chirps", Json.newObject().put("author", "ok").put("body", "x".repeat(281)));
+        route(
+            app,
+            new Http.RequestBuilder()
+                .method(POST)
+                .uri("/api/chirps")
+                .session("handle", "ok")
+                .bodyJson(Json.newObject().put("body", "x".repeat(281))));
     assertEquals(BAD_REQUEST, tooLong.status());
 
     // No JSON body at all.
-    Result noBody = route(app, new Http.RequestBuilder().method(POST).uri("/api/chirps"));
+    Result noBody =
+        route(
+            app,
+            new Http.RequestBuilder().method(POST).uri("/api/chirps").session("handle", "ok"));
     assertEquals(BAD_REQUEST, noBody.status());
+  }
+
+  @Test
+  public void writesRequireASession() {
+    // Create without a session -> 401, and nothing is stored.
+    Result anonymous =
+        routeJson(POST, "/api/chirps", Json.newObject().put("body", "should not exist"));
+    assertEquals(UNAUTHORIZED, anonymous.status());
+
+    // Delete without a session -> 401; someone else's chirp -> 403.
+    long id = createChirp("owner", "mine").get("id").asLong();
+    Result noSession =
+        route(app, new Http.RequestBuilder().method(DELETE).uri("/api/chirps/" + id));
+    assertEquals(UNAUTHORIZED, noSession.status());
+    Result wrongUser =
+        route(
+            app,
+            new Http.RequestBuilder()
+                .method(DELETE)
+                .uri("/api/chirps/" + id)
+                .session("handle", "intruder"));
+    assertEquals(FORBIDDEN, wrongUser.status());
+
+    // The owner can.
+    Result owner =
+        route(
+            app,
+            new Http.RequestBuilder()
+                .method(DELETE)
+                .uri("/api/chirps/" + id)
+                .session("handle", "owner"));
+    assertEquals(NO_CONTENT, owner.status());
   }
 
   @Test
@@ -156,7 +204,12 @@ public class ChirpControllerTest extends WithApplication {
     long id = createChirp("deleter", "delete me").get("id").asLong();
 
     Result deleted =
-        route(app, new Http.RequestBuilder().method(DELETE).uri("/api/chirps/" + id));
+        route(
+            app,
+            new Http.RequestBuilder()
+                .method(DELETE)
+                .uri("/api/chirps/" + id)
+                .session("handle", "deleter"));
     assertEquals(NO_CONTENT, deleted.status());
 
     Result get = route(app, new Http.RequestBuilder().method(GET).uri("/api/chirps/" + id));

@@ -5,7 +5,6 @@ import static java.util.concurrent.CompletableFuture.supplyAsync;
 
 import java.util.Optional;
 import java.util.concurrent.CompletionStage;
-import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,9 +40,6 @@ public class ChirpController extends Controller {
 
   private static final Logger log = LoggerFactory.getLogger(ChirpController.class);
 
-  /** Twitter's classic handle rules: word characters, at most 15. */
-  private static final Pattern HANDLE = Pattern.compile("[A-Za-z0-9_]{1,15}");
-
   /** Code points, not UTF-16 chars: an emoji chirp is not half the length it looks. */
   private static final int MAX_BODY = 280;
 
@@ -77,22 +73,23 @@ public class ChirpController extends Controller {
   }
 
   public CompletionStage<Result> create(Http.Request request) {
+    // The author is the session, never the body: a client cannot chirp as someone else.
+    Optional<String> author = request.session().get(AuthController.SESSION_HANDLE);
+    if (author.isEmpty()) {
+      return completedFuture(unauthorizedJson());
+    }
     JsonNode json = request.body().asJson();
     if (json == null) {
       return completedFuture(badRequestJson("expected a JSON body"));
     }
-    String author = json.path("author").asText("").trim();
     String body = json.path("body").asText("").trim();
-    if (!HANDLE.matcher(author).matches()) {
-      return completedFuture(badRequestJson("author must be 1-15 letters, digits or underscores"));
-    }
     if (body.isEmpty()) {
       return completedFuture(badRequestJson("body must not be empty"));
     }
     if (body.codePointCount(0, body.length()) > MAX_BODY) {
       return completedFuture(badRequestJson("body must be at most " + MAX_BODY + " characters"));
     }
-    return supplyAsync(() -> chirps.create(author, body), ec)
+    return supplyAsync(() -> chirps.create(author.get(), body), ec)
         .thenApply(
             chirp -> {
               log.info("chirp {} created by @{}", chirp.id, chirp.author);
@@ -106,16 +103,41 @@ public class ChirpController extends Controller {
             liked -> liked.map(c -> ok(envelope(toJson(c)))).orElseGet(() -> notFoundJson(id)));
   }
 
-  public CompletionStage<Result> delete(Long id) {
-    return supplyAsync(() -> chirps.delete(id), ec)
+  public CompletionStage<Result> delete(Long id, Http.Request request) {
+    Optional<String> user = request.session().get(AuthController.SESSION_HANDLE);
+    if (user.isEmpty()) {
+      return completedFuture(unauthorizedJson());
+    }
+    // find-then-delete rather than a blind delete: a missing chirp must 404 while someone
+    // else's chirp must 403, and a single delete statement cannot tell those apart.
+    return supplyAsync(
+            () ->
+                chirps
+                    .find(id)
+                    .map(c -> c.author.equals(user.get()) ? (chirps.delete(id) ? 204 : 404) : 403)
+                    .orElse(404),
+            ec)
         .thenApply(
-            deleted -> {
-              if (deleted) {
-                log.info("chirp {} deleted", id);
-                return noContent();
-              }
-              return notFoundJson(id);
-            });
+            outcome ->
+                switch (outcome) {
+                  case 204 -> {
+                    log.info("chirp {} deleted by @{}", id, user.get());
+                    yield noContent();
+                  }
+                  case 403 -> forbidden(errorJson("you can only delete your own chirps"));
+                  default -> notFoundJson(id);
+                });
+  }
+
+  private static Result unauthorizedJson() {
+    return unauthorized(errorJson("sign in first"));
+  }
+
+  private static ObjectNode errorJson(String message) {
+    ObjectNode node = Json.newObject();
+    node.put("success", false);
+    node.put("error", message);
+    return node;
   }
 
   private static Result noStore(Result result) {

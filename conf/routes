@@ -16,11 +16,61 @@ GET     /api/chirps/:id       controllers.ChirpController.get(id: Long)
 + nocsrf
 POST    /api/chirps/:id/like  controllers.ChirpController.like(id: Long)
 + nocsrf
-DELETE  /api/chirps/:id       controllers.ChirpController.delete(id: Long)
+DELETE  /api/chirps/:id       controllers.ChirpController.delete(id: Long, request: Request)
+
+# Sessions ride Play's signed cookie; SameSite=Lax (the default) is what keeps the nocsrf
+# exemptions safe — a cross-site POST does not carry the cookie.
++ nocsrf
+POST    /api/auth/register    controllers.AuthController.register(request: Request)
++ nocsrf
+POST    /api/auth/login       controllers.AuthController.login(request: Request)
++ nocsrf
+POST    /api/auth/logout      controllers.AuthController.logout(request: Request)
+GET     /api/auth/me          controllers.AuthController.me(request: Request)
 
 # API paths must be matched before the catch-all below, so that an unknown /api/... path
 # returns a JSON 404 rather than being handed the HTML shell.
 GET     /api/*resource        controllers.UIController.unknown(resource: String)
+
+# --- twitter-spring-reactjs port, phase 1: auth (PORTING.md). JWT auth, no session cookie,
+# so CSRF does not apply to these token-authenticated JSON routes.
++ nocsrf
+POST    /ui/v1/auth/login                      controllers.v1.AuthV1Controller.login(request: Request)
++ nocsrf
+POST    /ui/v1/auth/registration/check         controllers.v1.AuthV1Controller.registrationCheck(request: Request)
++ nocsrf
+POST    /ui/v1/auth/registration/code          controllers.v1.AuthV1Controller.registrationCode(request: Request)
+GET     /ui/v1/auth/registration/activate/:code controllers.v1.AuthV1Controller.registrationActivate(code: String)
++ nocsrf
+POST    /ui/v1/auth/registration/confirm       controllers.v1.AuthV1Controller.registrationConfirm(request: Request)
++ nocsrf
+POST    /ui/v1/auth/forgot/email               controllers.v1.AuthV1Controller.forgotEmail(request: Request)
++ nocsrf
+POST    /ui/v1/auth/forgot                     controllers.v1.AuthV1Controller.forgot(request: Request)
+GET     /ui/v1/auth/reset/:code                controllers.v1.AuthV1Controller.resetCode(code: String)
++ nocsrf
+POST    /ui/v1/auth/reset                      controllers.v1.AuthV1Controller.reset(request: Request)
+GET     /ui/v1/user/token                      controllers.v1.AuthV1Controller.token(request: Request)
+
+# Tweets (port phase 3). Interaction routes are declared before /tweets/:id so "like",
+# "retweet" and "reply" are not captured as tweet ids.
+GET     /ui/v1/tweets                          controllers.v1.TweetV1Controller.list(request: Request)
++ nocsrf
+POST    /ui/v1/tweets                          controllers.v1.TweetV1Controller.create(request: Request)
+GET     /ui/v1/tweets/user/:userId             controllers.v1.TweetV1Controller.byUser(userId: Long, request: Request)
+GET     /ui/v1/tweets/like/:userId/:tweetId    controllers.v1.TweetV1Controller.like(userId: Long, tweetId: Long, request: Request)
+GET     /ui/v1/tweets/retweet/:userId/:tweetId controllers.v1.TweetV1Controller.retweet(userId: Long, tweetId: Long, request: Request)
++ nocsrf
+POST    /ui/v1/tweets/reply/:userId/:tweetId   controllers.v1.TweetV1Controller.reply(userId: Long, tweetId: Long, request: Request)
+GET     /ui/v1/tweets/:id                      controllers.v1.TweetV1Controller.get(id: Long, request: Request)
+
+# Users (port phase 2, first slice): profile + the "Who to follow" sidebar.
+GET     /ui/v1/user/relevant                   controllers.v1.UserV1Controller.relevant(request: Request)
+GET     /ui/v1/user/:id                        controllers.v1.UserV1Controller.profile(id: Long, request: Request)
+
+# Unported /ui/v1 endpoints answer a JSON 404 instead of falling through to the HTML shell —
+# the frontend's sagas catch a 404 cleanly, but choke parsing HTML delivered as a 200.
+GET     /ui/v1/*resource                       controllers.UIController.unknown(resource: String)
 
 # Catch-all: a real static asset is served from /public, anything else is assumed to be a
 # client-side route and is given the shell so React Router can take over.
