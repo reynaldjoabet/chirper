@@ -57,14 +57,14 @@ lazy val root = (project in file("."))
       // production swaps db.default.url/driver for Postgres without touching code.
       javaJdbc,
       evolutions,
-      "com.h2database" % "h2" % "2.3.232",
+      "com.h2database" % "h2" % "2.5.252",
       // Password hashing (maintained bcrypt implementation; jbcrypt has been dormant since 2015)
       "at.favre.lib"        % "bcrypt"             % "0.10.2",
       "jakarta.inject"      % "jakarta.inject-api" % "2.0.1",
-      "com.outr"           %% "scribe"             % "3.19.0",
+      "com.outr"           %% "scribe"             % "3.19.1",
       "org.playframework"  %% "play-ebean"         % "9.0.0-M2",
       "de.dentrassi.crypto" % "pem-keystore"       % "3.0.0",
-      "com.outr"           %% "scribe-slf4j"       % "3.19.0",
+      "com.outr"           %% "scribe-slf4j"       % "3.19.1",
       munit                 % Test,
       // play-test (from the Play plugin) provides WithApplication and JUnit 4 itself, but sbt
       // only *detects* JUnit tests through this framework adapter — without it `sbt test`
