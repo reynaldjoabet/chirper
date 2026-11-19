@@ -2,7 +2,7 @@ import Dependencies._
 
 ThisBuild / name              := """chirper"""
 ThisBuild / organization      := "com.chirper"
-ThisBuild / scalaVersion      := "3.8.4"
+ThisBuild / scalaVersion      := "3.9.0"
 ThisBuild / version           := "0.1.0-SNAPSHOT"
 ThisBuild / semanticdbEnabled := true
 
@@ -13,11 +13,11 @@ ThisBuild / scalacOptions := Seq(
   "-deprecation",
   "-feature",
   "-unchecked",
-  "-source:3.3",
-  "-java-output-version:17",
+  // "-Werror",
+  // "-Wunused:all",
   "-Wvalue-discard",
   "-Wnonunit-statement",
-  "-Wshadow:all",
+  "-language:strictEquality",
   "-Xcheck-macros",
   "-Xmax-inlines:64"
 )
