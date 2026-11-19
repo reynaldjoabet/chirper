@@ -41,3 +41,7 @@ metals.sbt
 /.classpath
 /.settings
 /RUNNING_PID
+
+
+# SemanticDB for the build definition, written on reload when semanticdbEnabled is set globally
+*.sbt.semanticdb
