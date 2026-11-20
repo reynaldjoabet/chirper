@@ -1,10 +1,11 @@
 import Dependencies._
 
-ThisBuild / name              := """chirper"""
-ThisBuild / organization      := "com.chirper"
-ThisBuild / scalaVersion      := "3.9.0"
-ThisBuild / version           := "0.1.0-SNAPSHOT"
-ThisBuild / semanticdbEnabled := true
+ThisBuild / name         := """chirper"""
+ThisBuild / organization := "com.chirper"
+ThisBuild / scalaVersion := "3.9.0"
+ThisBuild / version      := "0.1.0-SNAPSHOT"
+// SemanticDB feeds Metals; CI has no consumer for it, so skip the extra compiler phase there.
+ThisBuild / semanticdbEnabled := !insideCI.value
 
 ThisBuild / scalacOptions := Seq(
   "-encoding",

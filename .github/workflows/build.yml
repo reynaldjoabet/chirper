@@ -20,6 +20,10 @@ concurrency:
 env:
   # Give the compiler room for the Iron/jsoniter macro expansions.
   SBT_OPTS: -Xmx4g -XX:ReservedCodeCacheSize=512m
+  # Pin sbt 2's disk cache so the cache step below saves the directory sbt actually uses.
+  # Unset, sbt picks it from XDG_CACHE_HOME or the OS default (SysProp.globalLocalCacheFrom),
+  # and appends /v2 either way.
+  SBT_LOCAL_CACHE: /home/runner/.cache/sbt
 
 jobs:
   # Formatting is independent of Scala and JDK version, so it runs once here
@@ -83,6 +87,26 @@ jobs:
 
       - name: Set up sbt
         uses: sbt/setup-sbt@v1
+
+      # FrontendPlugin runs `npm ci` in ui/ on every leg; caching ~/.npm makes that a local copy.
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # sbt 2's content-addressed action cache: compile outputs, test results and the Vite bundle.
+      # Restoring it turns unchanged work into cache hits. Keyed per leg so outputs never cross
+      # JDKs. Skipped on the nightly schedule, whose job is to actually re-run everything.
+      - name: Restore sbt action cache
+        if: github.event_name != 'schedule'
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.SBT_LOCAL_CACHE }}/v2
+          key: sbt2-${{ runner.os }}-${{ matrix.distribution }}-${{ matrix.java }}-${{ github.sha }}
+          restore-keys: |
+            sbt2-${{ runner.os }}-${{ matrix.distribution }}-${{ matrix.java }}-
 
       - name: Compile and test
         run: sbt -v "Test/compile; test"

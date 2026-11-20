@@ -231,9 +231,11 @@ object FrontendPlugin extends AutoPlugin {
     * Cached on the content hashes of `frontendSources`, so an unchanged UI never reruns vite.
     *
     * `declareOutputDirectory` hands the whole bundle to sbt's action cache: it is zipped into the
-    * CAS with a manifest of per-file hashes and restored by `syncBlobs` on a hit. That survives
-    * `clean`, and with a remote cache configured a CI machine can restore a bundle it never built.
-    * A hand-rolled stamp file can do neither -- it can only decide not to redo work whose output
+    * CAS with a manifest of per-file hashes and restored by `syncBlobs` on a hit. It survives
+    * deleting `target/`, and with a remote cache configured a CI machine can restore a bundle it
+    * never built. `clean` is the exception: since sbt 2.1 it invalidates the project's cache scope
+    * (Clean.scala, `ActionCache.invalidateScope`), so the command after a `clean` reruns vite. A
+    * hand-rolled stamp file can do neither -- it can only decide not to redo work whose output
     * still happens to be sitting on this disk.
     */
   private def buildTask = Def.cachedTask {
@@ -257,6 +259,9 @@ object FrontendPlugin extends AutoPlugin {
     // after the command runs, everything in frontendTarget was written by this build -- which is
     // what makes the index.html check below meaningful. Without this, output surviving from a
     // previous build satisfies the check and masks a command that silently wrote elsewhere.
+    // It is also what keeps the build off the CAS: sbt 2.1 restores cached outputs as symlinks
+    // into the read-only store (DiskActionCacheStore.syncFile), so a command that wrote over a
+    // restored file in place would write through the link, or fail on its permissions.
     IO.delete(out)
     run(
       frontendBuildCommand.value ++ outDirArgs(out),
@@ -286,11 +291,11 @@ object FrontendPlugin extends AutoPlugin {
     * Adapts the cached bundle back to the `Seq[File]` that resourceGenerators still expects.
     *
     * The existence check is not paranoia. On a cache hit sbt only re-syncs the bundle's
-    * `.sbtdir.zip` archive, and `syncFile` returns without unpacking when that archive is already
-    * in place with a matching digest -- the *contents* of the directory are never validated
-    * (ActionCacheStore.scala, `afterFileWrite` only fires on a rewrite). So a hand-deleted
-    * frontendTarget stays deleted through any number of green builds, and without this check
-    * `packageBin` ships a jar with no UI in it (observed, not theorized).
+    * `.sbtdir.zip` archive. Since 2.1 that re-extracts the archive when frontendTarget is missing
+    * *entirely* (ActionCacheStore.scala, `afterFileUpToDate`), but it is a single directory stat:
+    * when the directory exists, its *contents* are still never validated. So files deleted from
+    * inside frontendTarget stay deleted through any number of green builds, and without this check
+    * `packageBin` ships a jar with a partial UI in it.
     *
     * Recovery is cheap because `unpackageDirZip` runs `putBlob` on every file it extracts: each
     * bundle file sits individually in the CAS, so missing files are restored with `syncBlobs` -- no
