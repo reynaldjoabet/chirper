@@ -44,8 +44,9 @@ lazy val root = (project in file("."))
     // jsRoutes. A Vite-built React SPA can use neither: it knows its own URLs, and its bundle is
     // never served by Twirl. Off, they stop generating and compiling ReverseUIController and
     // routes$javascript on every routes change. The forward router (router.Routes) is unaffected.
-    generateReverseRouter   := false,
-    generateJsReverseRouter := false,
+    generateReverseRouter           := false,
+    generateJsReverseRouter         := false,
+    Compile / compile / cacheStores := Nil,
 
     // Play writes a RUNNING_PID on startup and refuses to boot if one already exists. In a
     // container that file survives an unclean stop, so the next start fails with a stale pid --
